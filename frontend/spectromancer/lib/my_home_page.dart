@@ -1,8 +1,9 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:fl_chart/fl_chart.dart';
 import 'package:http/http.dart' as http;
-import 'package:spectromancer/chart_widget.dart';
+import 'package:spectromancer/food_safe.dart';
+import 'package:spectromancer/toxin_widget.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class MyHomePage extends StatefulWidget {
   const MyHomePage({super.key});
@@ -12,8 +13,9 @@ class MyHomePage extends StatefulWidget {
 }
 
 class _MyHomePageState extends State<MyHomePage> {
-  List<FlSpot> _dataPoints = [];
-  List<Color> _colors = [];
+  List<String?> _toxins = [];
+  Uri _graphUri = Uri.parse('http://0.0.1:8000/data'); // default to localhost
+  bool _data = false;
 
   @override
   void initState() {
@@ -25,15 +27,11 @@ class _MyHomePageState extends State<MyHomePage> {
       final response = await http.get(Uri.parse('http://127.0.0.1:8000/data'));
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
+        _graphUri = Uri.parse(data['graph_uri']);
+        
         setState(() {
-          _dataPoints = (data['data'] as List)
-              .map((item) => FlSpot(
-                  item['wavelength'].toDouble(), item['intensity'].toDouble()))
-              .toList();
-          _colors = (data['data'] as List)
-              .map((item) =>
-                  _getColorForWavelength(item['wavelength'].toDouble()))
-              .toList();
+        _toxins = (data['toxins'] as List<dynamic>).map((item) => item as String?).toList();
+        _data = true;
         });
       } else {
         _showErrorDialog('Failed to load data');
@@ -41,7 +39,56 @@ class _MyHomePageState extends State<MyHomePage> {
     } catch (e) {
       _showErrorDialog('Failed to connect to server. Try again.');
     }
+    
   }
+
+
+
+  Future<void> _scan() async {
+    try {
+      final response = await http.post(
+        Uri.parse('http://127.0.0.1:8000/scan'),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode({'scan': true}));
+      if (response.statusCode == 200) {
+        final result = json.decode(response.body);
+        if (mounted) {
+          ScaffoldMessenger.of(context).clearSnackBars();
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(result['message']),
+              duration: Duration(seconds: 3),
+            ),
+          );
+        }
+        await _fetchData();
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).clearSnackBars();
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Failed to scan'),
+              duration: Duration(seconds: 3),
+            ),
+          );
+          
+        }
+      }
+    } catch (e) {
+      if(mounted){
+        ScaffoldMessenger.of(context).clearSnackBars();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to connect to server. Try again.'),
+          duration: Duration(seconds: 3),
+        ),
+      );
+      }
+     
+    }
+  }
+
+
   void _showErrorDialog(String message) {
     showDialog(
       context: context,
@@ -61,43 +108,24 @@ class _MyHomePageState extends State<MyHomePage> {
       },
     );
   }
-  Color _getColorForWavelength(double wavelength) {
-    if (wavelength >= 380 && wavelength < 440) {
-      return Colors.indigo;
-    } else if (wavelength >= 440 && wavelength < 490) {
-      return Colors.blue;
-    } else if (wavelength >= 490 && wavelength < 510) {
-      return Colors.green;
-    } else if (wavelength >= 510 && wavelength < 580) {
-      return Colors.yellow;
-    } else if (wavelength >= 580 && wavelength < 645) {
-      return Colors.orange;
-    } else if (wavelength >= 645 && wavelength <= 780) {
-      return Colors.red;
-    } else {
-      return Colors.grey;
-    }
-  }
-  List<Color> _getGradientColors() {
-    return _dataPoints.map((point) => _getColorForWavelength(point.x)).toList();
-  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Theme.of(context).colorScheme.surface,
       appBar: AppBar(
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        title: Text("Spectromancer"),
+        elevation: 2,
+        //backgroundColor: Theme.of(context).colorScheme.primaryContainer.withAlpha(150),
+        title: Text("Spectra",style: Theme.of(context).textTheme.titleLarge,),
         actions: [
-          IconButton(
+          OutlinedButton.icon(
+            label: Text("Refresh"),
             icon: Icon(Icons.refresh),
             onPressed: _fetchData,
           ),
         ],
       ),
       drawer: Drawer(
-        
         width: 210,
         child: ListView(
           padding: EdgeInsets.zero,
@@ -117,26 +145,47 @@ class _MyHomePageState extends State<MyHomePage> {
           ],
         ),
       ),
-      body: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(8.0),
-            child: SizedBox(
-              height: 300,
-             
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: ChartWidget(
-                  dataPoints: _dataPoints,
-                  colors: _colors,
-                  gradientColors: _getGradientColors(),
-                ),
-              ),
+      body: Center(
+
+        child: Padding(
+          padding: const EdgeInsets.all(8.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            mainAxisAlignment: MainAxisAlignment.start,
+            children: [
+              FoodSafe(isSafe: _toxins.isEmpty,numToxins: _toxins.length,data: _data,),
+              SizedBox(height: 12,),
+            
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  OutlinedButton(
+              onPressed: () async{
+               if (await canLaunchUrl(_graphUri)) {
+                  await launchUrl(_graphUri);
+                } else {
+                  throw 'Could not launch $_graphUri';
+                }
+              },
+              child: Text("Open Graph"),
             ),
+                  OutlinedButton(onPressed: (){
+                    _scan();
+                  }, child: Text("Scan again")),
+                ],
+              ),
+          
+              SizedBox(height: 12,),
+              Divider(),
+              ToxinWidget(toxins: _toxins),
+              SizedBox(height: 12,),
+            
+
+            ]
           ),
-        ],
+        ),
       ),
     );
   }
-
 }
+

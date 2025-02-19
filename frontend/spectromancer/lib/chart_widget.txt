@@ -12,7 +12,7 @@ class ChartWidget extends StatelessWidget {
     
     return Center(
         child: dataPoints.isEmpty
-            ? CircularProgressIndicator()
+            ? Text('No data')
             : SizedBox(
               width: dataPoints.length * 15.0,
               child: LineChart(
